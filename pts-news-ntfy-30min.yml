@@ -1,0 +1,35 @@
+name: PTS News Push (ntfy, 30min)
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 每 30 分鐘檢查一次
+  workflow_dispatch: {}       # 允許手動在 GitHub 網頁上點按「Run workflow」測試
+
+permissions:
+  contents: write   # 需要寫入權限，才能把 sent_links.json 的更新推回 repo
+
+jobs:
+  push-news:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run news push script
+        run: python pts_news_ntfy_dedup.py
+
+      - name: Commit updated sent_links.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sent_links.json
+          git diff --staged --quiet || git commit -m "Update sent_links.json [skip ci]"
+          git push
