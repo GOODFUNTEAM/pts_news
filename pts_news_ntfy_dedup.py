@@ -8,12 +8,16 @@ import html
 import json
 import os
 import re
+import time
+from datetime import datetime, timezone, timedelta
+
 import requests
 import feedparser
 
 RSS_URL = "https://news.pts.org.tw/xml/newsfeed.xml"
 MAX_ITEMS = 20          # 每次最多檢查最新幾則(避免漏抓)
 MAX_PUSH_PER_RUN = 8    # 每次最多實際推播幾則，避免一次爆量通知
+MAX_AGE_HOURS = 24      # 只推播發布時間在過去幾小時內的文章
 STATE_FILE = "sent_links.json"
 MAX_HISTORY = 300       # 記錄檔最多保留幾筆，避免無限增長
 
@@ -43,6 +47,15 @@ def save_sent_links(links):
         json.dump(trimmed, f, ensure_ascii=False, indent=2)
 
 
+def parse_published(entry):
+    """回傳文章發布時間 (UTC, datetime)，解析失敗回傳 None"""
+    for key in ("published_parsed", "updated_parsed"):
+        struct = entry.get(key)
+        if struct:
+            return datetime.fromtimestamp(time.mktime(struct), tz=timezone.utc)
+    return None
+
+
 def fetch_news():
     feed = feedparser.parse(RSS_URL)
     items = []
@@ -50,7 +63,8 @@ def fetch_news():
         title = clean_html(entry.get("title", ""))
         summary = clean_html(entry.get("summary", "") or entry.get("description", ""))
         link = entry.get("link", "")
-        items.append({"title": title, "summary": summary, "link": link})
+        published = parse_published(entry)
+        items.append({"title": title, "summary": summary, "link": link, "published": published})
     return items
 
 
@@ -72,10 +86,19 @@ def main():
     sent_links = load_sent_links()
     all_items = fetch_news()
 
-    new_items = [item for item in all_items if item["link"] not in sent_links]
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=MAX_AGE_HOURS)
+
+    def is_recent(item):
+        # 抓不到發布時間的文章，保守起見仍納入(避免漏推)
+        return item["published"] is None or item["published"] >= cutoff
+
+    new_items = [
+        item for item in all_items
+        if item["link"] not in sent_links and is_recent(item)
+    ]
 
     if not new_items:
-        print("沒有新文章，本次不推播")
+        print("沒有新文章（或都超過24小時），本次不推播")
         return
 
     to_push = new_items[:MAX_PUSH_PER_RUN]
