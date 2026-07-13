@@ -172,7 +172,7 @@ def ai_summarize(group) -> str:
     用 Gemini API 針對一組(可能來自多家媒體的同一事件)文章寫一段摘要。
     若沒有 API Key 或呼叫失敗，退回使用 RSS 原始描述拼接。
     """
-    fallback = " ".join(dict.fromkeys(it["summary"] for it in group if it["summary"]))[:60] or "(無摘要)"
+    fallback = " ".join(dict.fromkeys(it["summary"] for it in group if it["summary"]))[:200] or "(無摘要)"
 
     if not GEMINI_API_KEY:
         return fallback
@@ -183,25 +183,20 @@ def ai_summarize(group) -> str:
     )
     prompt = (
         "你是新聞編輯。請根據以下同一則新聞事件、來自不同媒體的報導內容，"
-        "用繁體中文寫一段30到40字的中立客觀摘要，只根據提供的內容摘寫，"
-        "不要加入未提及的資訊，不要條列，不要加標點以外的格式，直接輸出摘要文字本身：\n\n"
+        "用繁體中文寫一段不超過80字的中立客觀摘要，只根據提供的內容摘寫，"
+        "不要加入未提及的資訊，不要條列，直接輸出摘要文字本身：\n\n"
         f"{sources_text}"
     )
 
     try:
         resp = requests.post(
             f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 100},
-            },
+            json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=20,
         )
         resp.raise_for_status()
         data = resp.json()
         text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        if len(text) > 60:  # 保險截斷，避免模型沒遵守字數限制
-            text = text[:60] + "…"
         return text if text else fallback
     except Exception as e:
         print(f"Gemini 摘要失敗，改用原始描述：{e}")
